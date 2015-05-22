@@ -1,0 +1,11 @@
+#my_popup {
+		width:260px;
+		height:250px;
+		padding:30px;
+		background-color:gray;    
+		position:absolute;
+		top:10%;
+		left:40%;
+		display:none;
+}
+
