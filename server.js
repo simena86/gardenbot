@@ -7,12 +7,6 @@ function onLogin(){
 var express = require('express');
 var path = require('path');
 var app = express();
-
-app.get('/mongo_data.json',function(request,response){
-	console.log('get data');
-	response.send( JSON.stringify( SENSOR_DATA) );
-});
-
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/', express.static(__dirname + '/public'));
 
@@ -29,6 +23,12 @@ io.sockets.on('connection', function (socket) {
 	socket.on('cmd2', function (data) {
 		handleCmd2(data);
 	});
+});
+
+// route http get
+app.get('/mongo_data.json',function(request,response){
+	console.log('get data');
+	sendDBData(response);
 });
 
 // onoff
@@ -59,14 +59,14 @@ var interval = 3 * 1000;
 setInterval( onSensorReading, interval);
 
 function getNewSensorData(){
-  readHumidity();
-  var r = SENSOR_READING.humidity;
-  var aDate1 = new Date();
-  console.log(r);
-  var newDataObj = {
-    sensors : {
-			power : [aDate1, r, null],
-			temp : [aDate1, r+3, null]		
+	readHumidity();
+  	var r = SENSOR_READING.humidity;
+  	var aDate1 = new Date();
+  	var newDataObj = {
+		sensors : {
+			humidity : {
+				'date': new Date(), 'value': r, 'data': null
+			}
 		}
 	}
 	return newDataObj;
@@ -85,22 +85,25 @@ function onSensorReading(){
 }
 
 function updateDatabase(newData){
-
+	var humData;
+	if (humidityCollection != null){
+		humData = newData.sensors.humidity
+		humidityCollection.update( {type: 'sensorData'}, {$push: {'humidity' : humData }});
+	}
 }
 
-var SENSOR_DATA = {
-	raw1 : [[2015, 05, 24, 0, 00, 34, 01], 
-				 [2015, 05, 24, 0, 01, 35, 02]], 
-	raw2 : [[2015, 05, 24, 0, 00, 34, 01], 
-				 [2015, 05, 24, 0, 01, 35, 03]], 
-
+// send entire db data as a response to a get
+function sendDBData( response ){
+	var stream = humidityCollection.find({type:'sensorData'}).stream();
+	humidityCollection.find({type:'sensorData'}).toArray(function(err, items) {
+		response.send( JSON.stringify(  items ) );
+	});
 }
 
 var SENSOR_READING = {
 	humidity : 0,
 	light : 0
 }
-
 
 // ADC
 var ads1x15 = require('node-ads1x15');
@@ -110,7 +113,6 @@ var channel = 0; //channel 0, 1, 2, or 3...
 var samplesPerSecond = 64; // see index.js for allowed values for your chip
 var progGainAmp = 4096; // see index.js for allowed values for your chip
 
-//somewhere to store our reading
 function readHumidity(){
     if(!adc.busy){
         adc.readADCSingleEnded(channel,progGainAmp, samplesPerSecond,  function(err,data) {
@@ -119,8 +121,7 @@ function readHumidity(){
                throw err;
             }
             SENSOR_READING.humidity = data;
-        }
-        );
+        });
     }
 }
 
@@ -128,30 +129,23 @@ var db_url = "mongodb://simen2:raspberry@ds029640.mongolab.com:29640/home_automa
 var mongodb = require('mongodb');
 var MongoClient = mongodb.MongoClient;
 var myDB = null;
+var humidityCollection = null;
 
 MongoClient.connect(db_url, function (err, db) {
-  if (err) {
-    console.log('Unable to connect to the mongoDB server. Error:', err);
-  } else {
-    console.log('Connection established to', db_url);
-	myDB = db;
-  }
+  	if (err) {
+    	console.log('Unable to connect to the mongoDB server. Error:', err);
+	} else {
+		console.log('Connection established to', db_url);
+		myDB = db;
+		humidityCollection = db.collection('humidity');
+		humidityCollection.findOne({ type: 'sensorData' }, function(err, doc) { 
+			if (doc) { 
+				console.log("sensor data exists"); 
+			} else { 
+				console.log("sensorData doesn't exist"); 
+				humidityCollection.insert({type : 'sensorData', humidity: []});	
+			}
+  		});
+  	}
 });
 
-/*
-//Create some users
-var user1 = {name: 'modulus admin', age: 42, roles: ['admin', 'moderator', 'user']};
-var user2 = {name: 'modulus user', age: 22, roles: ['user']};
-var user3 = {name: 'modulus super admin', age: 92, roles: ['super-admin', 'admin', 'moderator', 'user']};
-
-// Insert some users
-collection.insert([user1, user2, user3], function (err, result) {
-  if (err) {
-	console.log(err);
-  } else {
-	console.log('Inserted %d documents into the "users" collection. The documents inserted with "_id" are:', result.length, result);
-  }
-  //Close connection
-  db.close();
-});
-*/
